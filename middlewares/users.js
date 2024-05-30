@@ -1,10 +1,30 @@
 const users = require("../models/user");
 const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const findAllUsers = async (req, res, next) => {
-  console.log("GET /api/users");
-  req.usersArray = await users.find({}, { password: 0 });
+  req.usersArray = await users.find({});
   next();
+};
+
+const findUserById = async (req, res, next) => {
+  try {
+    req.user = await users.findById(req.params.id);
+    next();
+  } catch (error) {
+    res.status(404).send({ message: "User not found" });
+  }
+};
+
+const hashPassword = async (req, res, next) => {
+  try {
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash(req.body.password, salt);
+    req.body.password = hash;
+    next();
+  } catch (error) {
+    res.status(400).send({ message: "Ошибка хеширования пароля" });
+  }
 };
 
 const createUser = async (req, res, next) => {
@@ -12,29 +32,15 @@ const createUser = async (req, res, next) => {
     req.user = await users.create(req.body);
     next();
   } catch (error) {
-    res.status(400).send("Ошибка при создании пользователя");
-  }
-};
-
-
-const findUserById = async (req, res, next) => {
-  console.log("GET /api/users/:id");
-  try {
-    req.user = await users.findById(req.params.id, { password: 0 });
-    next();
-  } catch (error) {
-    res.status(404).send("User not found");
+    res.status(400).send({ message: "Error creating user" });
   }
 };
 
 const updateUser = async (req, res, next) => {
   try {
-    // В метод передаём id из параметров запроса и объект с новыми свойствами
     req.user = await users.findByIdAndUpdate(req.params.id, req.body);
-    next();
   } catch (error) {
-    res.setHeader("Content-Type", "application/json");
-    res.status(400).send(JSON.stringify({ message: "Ошибка обновления пользователя" }));
+    res.status(400).send({ message: "Error updating user" });
   }
 };
 
@@ -43,68 +49,48 @@ const deleteUser = async (req, res, next) => {
     req.user = await users.findByIdAndDelete(req.params.id);
     next();
   } catch (error) {
-    res.setHeader("Content-Type", "application/json");
-    res.status(400).send(JSON.stringify({ message: "Ошибка удаления пользователя" }));
+    res.status(400).send({ message: "Error deleting user" });
   }
 };
 
-const checkEmptyNameAndEmailAndPassword = async (req, res, next) => {
-  if (
-    !req.body.name ||
-    !req.body.email ||
-    !req.body.password
-  ) {
-    // Если какое-то из полей отсутствует, то не будем обрабатывать запрос дальше,
-    // а ответим кодом 400 — данные неверны.
-    res.setHeader("Content-Type", "application/json");
-    res.status(400).send(JSON.stringify({ message: "Заполни все поля" }));
-  } else {
-    // Если всё в порядке, то передадим управление следующим миддлварам
-    next();
-  }
-};
+const checkAuth = (req, res, next) => {
+  // мы передавали токен в специальном заголовке Authorizatio - достаем
+  const { authorization } = req.headers;
 
-const checkEmptyNameAndEmail = async (req, res, next) => {
-  if (
-    !req.body.name ||
-    !req.body.email
-  ) {
-    // Если какое-то из полей отсутствует, то не будем обрабатывать запрос дальше,
-    // а ответим кодом 400 — данные неверны.
-    res.setHeader("Content-Type", "application/json");
-    res.status(400).send(JSON.stringify({ message: "Заполни все поля" }));
-  } else {
-    // Если всё в порядке, то передадим управление следующим миддлварам
-    next();
+  // проверка на наличие токена
+  if (!authorization || !authorization.startsWith("Bearer ")) {
+    return res.status(401).send({ message: "Необходима авторизация" });
   }
-};
 
-const hashPassword = async (req, res, next) => {
+  // Общепринято использовать приставку Bearer в заголовке авторизации,
+  // но для проверки удалим
+  const token = authorization.replace("Bearer ", "");
+
+  // проверим с помощью ключа, который использовался при генерации токена
   try {
-    // Создаём случайную строку длиной в десять символов
-    const salt = await bcrypt.genSalt(10);
-    // Хешируем пароль
-    const hash = await bcrypt.hash(req.body.password, salt);
-    // Полученный в запросе пароль подменяем на хеш
-    req.body.password = hash;
-    next();
-  } catch (error) {
-    res.status(400).send({ message: "Ошибка хеширования пароля" });
+    // результат проверки — расшифрованные данные, которые изначально были зашифрованы в токене
+    req.user = jwt.verify(token, "some-secret-key");
+  } catch (err) {
+    return res.status(401).send({ message: "Необходима авторизация" });
   }
+  next();
 };
 
-const checkIsUserExists = async (req, res, next) => {
-  const isInArray = req.usersArray.find((user) => {
-    return req.body.email === user.email;
-  });
-  if (isInArray) {
-    res
-      .status(400)
-      .send({ message: "Пользователь с таким email уже существует" });
-  } else {
-    next();
+const checkCookiesJWT = (req, res, next) => {
+  if (!req.cookies.jwt) {
+    return res.redirect("/");
   }
+  req.headers.authorization = `Bearer ${req.cookies.jwt}`;
+  next();
 };
 
-// Экспортируем функцию поиска всех пользователей
-module.exports = { findAllUsers, createUser, checkIsUserExists, findUserById, updateUser, deleteUser, checkEmptyNameAndEmailAndPassword, checkEmptyNameAndEmail, hashPassword };
+module.exports = {
+  findAllUsers,
+  findUserById,
+  createUser,
+  updateUser,
+  deleteUser,
+  hashPassword,
+  checkAuth,
+  checkCookiesJWT,
+};
