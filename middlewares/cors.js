@@ -1,5 +1,5 @@
 const allowedCors = [
-    "https://bankai-frontend.nomoredomainswork.ru",
+    "https://bankai-frontend.nomorepartiesco.ru",
     "http://localhost:3001",
     "http://localhost:3000",
   ];
